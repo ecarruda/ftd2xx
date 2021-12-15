@@ -22,6 +22,8 @@ from .ftd2xx import (
     listDevices,
     open,
     openEx,
+    getVIDPID,
+    setVIDPID
 )
 
 __all__ = [
