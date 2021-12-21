@@ -22,6 +22,7 @@ from .ftd2xx import (
     listDevices,
     open,
     openEx,
+    openLocation,
     getVIDPID,
     setVIDPID
 )
@@ -34,6 +35,7 @@ __all__ = [
     "getDeviceInfoDetail",
     "open",
     "openEx",
+    "openLocation",
     "FTD2XX",
     "DeviceError",
     "ft_program_data",

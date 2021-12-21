@@ -240,6 +240,11 @@ def openEx(
     call_ft(_ft.FT_OpenEx, id_str, _ft.DWORD(flags), c.byref(h))
     return FTD2XX(h, update=update)
 
+def openLocation(location_str: bytes, update: bool = True):
+    h = _ft.FT_HANDLE()
+    call_ft(_ft.FT_OpenEx, location_str, _ft.DWORD(defines.OPEN_BY_LOCATION), c.byref(h))
+    return FTD2XX(h, update=update)
+
 
 if sys.platform == "win32":
     from win32con import GENERIC_READ, GENERIC_WRITE, OPEN_EXISTING
@@ -299,19 +304,22 @@ class FTD2XX(AbstractContextManager):
         call_ft(_ft.FT_Close, self.handle)
         self.status = 0
 
-    def read(self, nchars: int, raw: bool = True) -> bytes:
+    def read(self, nchars: int=None, raw: bool = True) -> bytes:
         """Read up to nchars bytes of data from the device. Can return fewer if
         timedout. Use getQueueStatus to find how many bytes are available"""
+        if nchars is None:
+            nchars = self.queue_status
+
         b_read = _ft.DWORD()
         b = c.c_buffer(nchars)
         call_ft(_ft.FT_Read, self.handle, b, nchars, c.byref(b_read))
         return b.raw[: b_read.value] if raw else b.value[: b_read.value]
 
-    def write(self, data: bytes):
+    def write(self, data: bytes, count: int=None):
         """Send the data to the device. Data must be a string representing the
         bytes to be sent"""
         w = _ft.DWORD()
-        call_ft(_ft.FT_Write, self.handle, data, len(data), c.byref(w))
+        call_ft(_ft.FT_Write, self.handle, data, count or len(data), c.byref(w))
         return w.value
 
     def ioctl(self):
@@ -609,6 +617,24 @@ class FTD2XX(AbstractContextManager):
             c.byref(b_read),
         )
         return bytes(buf[: b_read.value])
+
+    def readEE(self, addr):
+        """Read a 16-bit word from an EEPROM location"""
+        d = _ft.WORD()
+        call_ft(_ft.FT_ReadEE, self.handle, _ft.DWORD(addr), c.byref(d))
+        return d.value
+
+    def writeEE(self, addr, value):
+        """Write a 16-bit word to an EEPROM location"""
+        upd = 0xffff & (self[addr] ^ value)
+        call_ft(_ft.FT_WriteEE, self.handle, _ft.DWORD(addr), _ft.WORD(value))
+        # update checksum assuming initial checksum is correct
+         # ee[127] = 0x5555 ^ (ee[0] << 127) ^ (ee[1] << 126) ... ^ sl(ee[126] << 1)
+         # shifts are 16-bit circular shifts
+        n = (127 - addr) % 16
+        upd = 0xffff & ((upd << n) | (upd >> (16 - n)))
+        upd ^= self[127]
+        call_ft(_ft.FT_WriteEE, self.handle, _ft.DWORD(127), _ft.WORD(upd))
 
     def __exit__(
         self,
