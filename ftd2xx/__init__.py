@@ -11,21 +11,38 @@ from __future__ import absolute_import
 import sys
 
 from . import aio
-from .ftd2xx import (
-    FTD2XX,
-    DeviceError,
-    call_ft,
-    createDeviceInfoList,
-    ft_program_data,
-    getDeviceInfoDetail,
-    getLibraryVersion,
-    listDevices,
-    open,
-    openEx,
-    openLocation,
-    getVIDPID,
-    setVIDPID
-)
+
+if sys.platform == "win32":
+    from .ftd2xx import (
+        FTD2XX,
+        DeviceError,
+        call_ft,
+        createDeviceInfoList,
+        ft_program_data,
+        getDeviceInfoDetail,
+        getLibraryVersion,
+        listDevices,
+        open,
+        openEx,
+        openLocation,
+        w32CreateFile
+    )
+else:
+    from .ftd2xx import (
+        FTD2XX,
+        DeviceError,
+        call_ft,
+        createDeviceInfoList,
+        ft_program_data,
+        getDeviceInfoDetail,
+        getLibraryVersion,
+        listDevices,
+        open,
+        openEx,
+        openLocation,
+        getVIDPID,
+        setVIDPID
+    )
 
 __all__ = [
     "call_ft",
