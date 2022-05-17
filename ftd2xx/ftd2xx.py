@@ -9,7 +9,9 @@ import sys
 from builtins import range
 from contextlib import AbstractContextManager
 from types import TracebackType
-from typing import Callable, List, Optional, Tuple, Type, TypedDict, Union
+from typing import Any, Callable, List, Optional, Tuple, Type, Union
+import ctypes as c
+from . import defines
 
 if sys.platform == "win32":
     from . import _ftd2xx as _ft
@@ -20,42 +22,26 @@ elif sys.platform == "darwin":
 else:
     raise Exception("Unknown platform")
 
-import ctypes as c
+if sys.version_info >= (3, 8, 0):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
-from . import defines
 
 ft_program_data = _ft.ft_program_data
 
 LOGGER = logging.getLogger("ftd2xx")
 
-msgs = [
-    "OK",
-    "INVALID_HANDLE",
-    "DEVICE_NOT_FOUND",
-    "DEVICE_NOT_OPENED",
-    "IO_ERROR",
-    "INSUFFICIENT_RESOURCES",
-    "INVALID_PARAMETER",
-    "INVALID_BAUD_RATE",
-    "DEVICE_NOT_OPENED_FOR_ERASE",
-    "DEVICE_NOT_OPENED_FOR_WRITE",
-    "FAILED_TO_WRITE_DEVICE0",
-    "EEPROM_READ_FAILED",
-    "EEPROM_WRITE_FAILED",
-    "EEPROM_ERASE_FAILED",
-    "EEPROM_NOT_PRESENT",
-    "EEPROM_NOT_PROGRAMMED",
-    "INVALID_ARGS",
-    "NOT_SUPPORTED",
-    "OTHER_ERROR",
-]
-
 
 class DeviceError(Exception):
     """Exception class for status messages"""
 
-    def __init__(self, message: Union[int, str]):
-        self.message = msgs[message] if isinstance(message, int) else message
+    def __init__(self, message: Union[int, Any]):
+        super().__init__()
+        if isinstance(message, int):
+            self.message = defines.Status(message).name
+        else:
+            self.message = str(message)
 
     def __str__(self):
         return self.message
@@ -143,7 +129,7 @@ class ProgramData(TypedDict, total=False):
 def call_ft(function: Callable, *args):
     """Call an FTDI function and check the status. Raise exception on error"""
     status = function(*args)
-    if status != _ft.FT_OK:
+    if status != defines.Status.OK:
         raise DeviceError(status)
 
 
@@ -154,7 +140,7 @@ def listDevices(flags: int = 0) -> Optional[List[bytes]]:
     n = _ft.DWORD()
     call_ft(_ft.FT_ListDevices, c.byref(n), None, _ft.DWORD(defines.LIST_NUMBER_ONLY))
     devcount = n.value
-    LOGGER.debug(f"Found {devcount} devices")
+    LOGGER.debug("Found %i devices", devcount)
     if devcount:
         # since ctypes has no pointer arithmetic.
         bd = [
@@ -168,8 +154,8 @@ def listDevices(flags: int = 0) -> Optional[List[bytes]]:
         #     ba[i] = c.c_char_p(bd[i])
         call_ft(_ft.FT_ListDevices, ba, c.byref(n), _ft.DWORD(defines.LIST_ALL | flags))
         return [res for res in ba[:devcount]]
-    else:
-        return None
+
+    return None
 
 
 def getLibraryVersion() -> int:
@@ -191,7 +177,7 @@ def getDeviceInfoDetail(devnum: int = 0, update: bool = True) -> DeviceInfoDetai
     False to avoid a slow call to createDeviceInfoList."""
     flags = _ft.DWORD()
     typ = _ft.DWORD()
-    id = _ft.DWORD()
+    dev_id = _ft.DWORD()
     location = _ft.DWORD()
     handle = _ft.FT_HANDLE()
     name = c.create_string_buffer(defines.MAX_DESCRIPTION_SIZE)
@@ -204,7 +190,7 @@ def getDeviceInfoDetail(devnum: int = 0, update: bool = True) -> DeviceInfoDetai
         _ft.DWORD(devnum),
         c.byref(flags),
         c.byref(typ),
-        c.byref(id),
+        c.byref(dev_id),
         c.byref(location),
         name,
         description,
@@ -214,7 +200,7 @@ def getDeviceInfoDetail(devnum: int = 0, update: bool = True) -> DeviceInfoDetai
         "index": devnum,
         "flags": flags.value,
         "type": typ.value,
-        "id": id.value,
+        "id": dev_id.value,
         "location": location.value,
         "serial": name.value,
         "description": description.value,
@@ -222,9 +208,17 @@ def getDeviceInfoDetail(devnum: int = 0, update: bool = True) -> DeviceInfoDetai
     }
 
 
-def open(dev: int = 0, update: bool = True):
+def open(dev: int = 0, update: bool = True):  # pylint: disable=redefined-builtin
     """Open a handle to a usb device by index and return an FTD2XX instance for
-    it. Set update to False to avoid a slow call to createDeviceInfoList."""
+    it. Set update to False to avoid a slow call to createDeviceInfoList.
+
+    Args:
+        dev (int): Device number
+        update (bool): Set False to disable automatic call to createDeviceInfoList
+
+    Returns:
+        instance of FTD2XX instance if successful
+    """
     h = _ft.FT_HANDLE()
     call_ft(_ft.FT_Open, dev, c.byref(h))
     return FTD2XX(h, update=update)
@@ -235,7 +229,16 @@ def openEx(
 ):
     """Open a handle to a usb device by serial number(default), description or
     location(Windows only) depending on value of flags and return an FTD2XX
-    instance for it. Set update to False to avoid a slow call to createDeviceInfoList."""
+    instance for it. Set update to False to avoid a slow call to createDeviceInfoList.
+
+    Args:
+        id_str (bytes): ID string from listDevices
+        flags (int) = FLAG (consult D2XX Guide). Defaults to OPEN_BY_SERIAL_NUMBER
+        update (bool): Set False to disable automatic call to createDeviceInfoList
+
+    Returns:
+        instance of FTD2XX instance if successful
+    """
     h = _ft.FT_HANDLE()
     call_ft(_ft.FT_OpenEx, id_str, _ft.DWORD(flags), c.byref(h))
     return FTD2XX(h, update=update)
@@ -292,8 +295,13 @@ class FTD2XX(AbstractContextManager):
 
     def __init__(self, handle: _ft.FT_HANDLE, update: bool = True):
         """Create an instance of the FTD2XX class with the given device handle
-        and populate the device info in the instance dictionary. Set
-        update to False to avoid a slow call to createDeviceInfoList."""
+        and populate the device info in the instance dictionary.
+
+        Args:
+            update (bool): Set False to disable automatic (slow) call to
+            createDeviceInfoList
+
+        """
         self.handle = handle
         self.status = 1
         # createDeviceInfoList is slow, only run if update is True
@@ -313,7 +321,7 @@ class FTD2XX(AbstractContextManager):
             nchars = self.getQueueStatus()
 
         b_read = _ft.DWORD()
-        b = c.c_buffer(nchars)
+        b = c.create_string_buffer(nchars)
         call_ft(_ft.FT_Read, self.handle, b, nchars, c.byref(b_read))
         return b.raw[: b_read.value] if raw else b.value[: b_read.value]
 
@@ -331,12 +339,10 @@ class FTD2XX(AbstractContextManager):
     def setBaudRate(self, baud: int) -> None:
         """Set the baud rate"""
         call_ft(_ft.FT_SetBaudRate, self.handle, _ft.DWORD(baud))
-        return None
 
     def setDivisor(self, div: int):
         """Set the clock divider. The clock will be set to 6e6/(div + 1)."""
         call_ft(_ft.FT_SetDivisor, self.handle, _ft.USHORT(div))
-        return None
 
     def setDataCharacteristics(self, wordlen: int, stopbits: int, parity: int):
         """Set the data characteristics for UART"""
@@ -347,7 +353,6 @@ class FTD2XX(AbstractContextManager):
             _ft.UCHAR(stopbits),
             _ft.UCHAR(parity),
         )
-        return None
 
     def setFlowControl(self, flowcontrol: int, xon: int = -1, xoff: int = -1):
         if flowcontrol == defines.FLOW_XON_XOFF and (xon == -1 or xoff == -1):
@@ -359,33 +364,27 @@ class FTD2XX(AbstractContextManager):
             _ft.UCHAR(xon),
             _ft.UCHAR(xoff),
         )
-        return None
 
     def resetDevice(self):
         """Reset the device"""
         call_ft(_ft.FT_ResetDevice, self.handle)
-        return None
 
     def setDtr(self):
         call_ft(_ft.FT_SetDtr, self.handle)
-        return None
 
     def clrDtr(self):
         call_ft(_ft.FT_ClrDtr, self.handle)
-        return None
 
     def setRts(self):
         call_ft(_ft.FT_SetRts, self.handle)
-        return None
 
     def clrRts(self):
         call_ft(_ft.FT_ClrRts, self.handle)
-        return None
 
-    def getModemStatus(self) -> int:
+    def getModemStatus(self) -> defines.ModemStatus:
         m = _ft.DWORD()
         call_ft(_ft.FT_GetModemStatus, self.handle, c.byref(m))
-        return m.value
+        return defines.ModemStatus(m.value & 0xFFFF)
 
     def setChars(self, evch: int, evch_en: int, erch: int, erch_en: int):
         call_ft(
@@ -396,23 +395,19 @@ class FTD2XX(AbstractContextManager):
             _ft.UCHAR(erch),
             _ft.UCHAR(erch_en),
         )
-        return None
 
     def purge(self, mask: int = 0):
         if not mask:
             mask = defines.PURGE_RX | defines.PURGE_TX
         call_ft(_ft.FT_Purge, self.handle, _ft.DWORD(mask))
-        return None
 
     def setTimeouts(self, read: int, write: int):
         call_ft(_ft.FT_SetTimeouts, self.handle, _ft.DWORD(read), _ft.DWORD(write))
-        return None
 
     def setDeadmanTimeout(self, timeout: int):
         call_ft(_ft.FT_SetDeadmanTimeout, self.handle, _ft.DWORD(timeout))
-        return None
 
-    def getQueueStatus(self):
+    def getQueueStatus(self) -> int:
         """Get number of bytes in receive queue."""
         rxQAmount = _ft.DWORD()
         call_ft(_ft.FT_GetQueueStatus, self.handle, c.byref(rxQAmount))
@@ -425,7 +420,6 @@ class FTD2XX(AbstractContextManager):
             _ft.DWORD(evtmask),
             _ft.HANDLE(evthandle),
         )
-        return None
 
     def getStatus(self):
         """Return a 3-tuple of rx queue bytes, tx queue bytes and event
@@ -444,15 +438,12 @@ class FTD2XX(AbstractContextManager):
 
     def setBreakOn(self):
         call_ft(_ft.FT_SetBreakOn, self.handle)
-        return None
 
     def setBreakOff(self):
         call_ft(_ft.FT_SetBreakOff, self.handle)
-        return None
 
     def setWaitMask(self, mask: int):
         call_ft(_ft.FT_SetWaitMask, self.handle, _ft.DWORD(mask))
-        return None
 
     def waitOnMask(self):
         mask = _ft.DWORD()
@@ -466,7 +457,6 @@ class FTD2XX(AbstractContextManager):
 
     def setLatencyTimer(self, latency: int):
         call_ft(_ft.FT_SetLatencyTimer, self.handle, _ft.UCHAR(latency))
-        return None
 
     def getLatencyTimer(self) -> int:
         latency = _ft.UCHAR()
@@ -475,7 +465,6 @@ class FTD2XX(AbstractContextManager):
 
     def setBitMode(self, mask: int, enable: bool):
         call_ft(_ft.FT_SetBitMode, self.handle, _ft.UCHAR(mask), _ft.UCHAR(enable))
-        return None
 
     def getBitMode(self) -> int:
         mask = _ft.UCHAR()
@@ -489,14 +478,13 @@ class FTD2XX(AbstractContextManager):
             _ft.ULONG(in_tx_size),
             _ft.ULONG(out_tx_size),
         )
-        return None
 
     def getDeviceInfo(self) -> DeviceInfo:
         """Returns a dictionary describing the device."""
         deviceType = _ft.DWORD()
         deviceId = _ft.DWORD()
-        desc = c.c_buffer(defines.MAX_DESCRIPTION_SIZE)
-        serial = c.c_buffer(defines.MAX_DESCRIPTION_SIZE)
+        desc = c.create_string_buffer(defines.MAX_DESCRIPTION_SIZE)
+        serial = c.create_string_buffer(defines.MAX_DESCRIPTION_SIZE)
 
         call_ft(
             _ft.FT_GetDeviceInfo,
@@ -516,23 +504,18 @@ class FTD2XX(AbstractContextManager):
 
     def stopInTask(self):
         call_ft(_ft.FT_StopInTask, self.handle)
-        return None
 
     def restartInTask(self):
         call_ft(_ft.FT_RestartInTask, self.handle)
-        return None
 
     def setRestPipeRetryCount(self, count):
         call_ft(_ft.FT_SetResetPipeRetryCount, self.handle, _ft.DWORD(count))
-        return None
 
     def resetPort(self):
         call_ft(_ft.FT_ResetPort, self.handle)
-        return None
 
     def cyclePort(self):
         call_ft(_ft.FT_CyclePort, self.handle)
-        return None
 
     def getDriverVersion(self) -> int:
         drvver = _ft.DWORD()
@@ -544,8 +527,8 @@ class FTD2XX(AbstractContextManager):
         m = _ft.LONG()
         try:
             call_ft(_ft.FT_GetComPortNumber, self.handle, c.byref(m))
-        except AttributeError:
-            raise Exception("FT_GetComPortNumber is only available on windows")
+        except AttributeError as exc:
+            raise Exception("FT_GetComPortNumber is only available on windows") from exc
         return m.value
 
     def eeProgram(self, progdata: Optional[ft_program_data] = None, **kwds) -> None:
@@ -563,7 +546,6 @@ class FTD2XX(AbstractContextManager):
         progdata.Signature2 = _ft.DWORD(0xFFFFFFFF)
         progdata.Version = _ft.DWORD(2)
         call_ft(_ft.FT_EE_Program, self.handle, progdata)
-        return None
 
     def eeRead(self) -> ft_program_data:
         """Get the program information from the EEPROM"""
@@ -574,10 +556,10 @@ class FTD2XX(AbstractContextManager):
         #        else:
         #            version = 0
 
-        Manufacturer = c.c_buffer(defines.MAX_DESCRIPTION_SIZE)
-        ManufacturerId = c.c_buffer(defines.MAX_DESCRIPTION_SIZE)
-        Description = c.c_buffer(defines.MAX_DESCRIPTION_SIZE)
-        SerialNumber = c.c_buffer(defines.MAX_DESCRIPTION_SIZE)
+        Manufacturer = c.create_string_buffer(defines.MAX_DESCRIPTION_SIZE)
+        ManufacturerId = c.create_string_buffer(defines.MAX_DESCRIPTION_SIZE)
+        Description = c.create_string_buffer(defines.MAX_DESCRIPTION_SIZE)
+        SerialNumber = c.create_string_buffer(defines.MAX_DESCRIPTION_SIZE)
         progdata = ft_program_data(
             **ProgramData(
                 Signature1=0,
@@ -604,7 +586,6 @@ class FTD2XX(AbstractContextManager):
         appropriate byte values"""
         buf = c.create_string_buffer(data)
         call_ft(_ft.FT_EE_UAWrite, self.handle, buf, len(data))
-        return None
 
     def eeUARead(self, b_to_read: int) -> bytes:
         """Read b_to_read bytes from the EEPROM user area"""
