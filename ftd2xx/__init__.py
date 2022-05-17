@@ -56,9 +56,12 @@ __all__ = [
     "FTD2XX",
     "DeviceError",
     "ft_program_data",
-    "aio",
 ]
 if sys.platform == "win32":
+    from .ftd2xx import w32CreateFile
+
     __all__ += ["w32CreateFile"]
 else:
+    from .ftd2xx import getVIDPID, setVIDPID
+
     __all__ += ["getVIDPID", "setVIDPID"]
