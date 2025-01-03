@@ -194,10 +194,8 @@ def listDevices(flags: int = 0) -> list[bytes] | None:
 
         # array of pointers to those strings, initially all NULL
         ba = (c.c_char_p * (devcount + 1))(*[c.addressof(x) for x in bd], None)
-        # for i in range(devcount):
-        #     ba[i] = c.c_char_p(bd[i])
         call_ft(_ft.FT_ListDevices, ba, c.byref(n), _ft.DWORD(defines.LIST_ALL | flags))
-        return [res for res in ba[:devcount]]
+        return list(ba[:devcount])
 
     return None
 
