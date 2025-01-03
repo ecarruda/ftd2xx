@@ -184,7 +184,6 @@ class TestGlobalFunctions(unittest.TestCase):
         assert device.status == 0
 
     def testopenEx(self):
-        dev0 = None
         devices = ftd2xx.listDevices()
         if devices is None:
             raise DeviceError("Device not found")
