@@ -180,8 +180,7 @@ def call_ft(function: Callable, *args):
 
 def listDevices(flags: int = 0) -> list[bytes] | None:
     """Return a list of serial numbers(default), descriptions or
-    locations (Windows only) of the connected FTDI devices depending on value
-    of flags"""
+    locations of the connected FTDI devices depending on value of flags"""
     n = _ft.DWORD()
     call_ft(_ft.FT_ListDevices, c.byref(n), None, _ft.DWORD(defines.LIST_NUMBER_ONLY))
     devcount = n.value
@@ -195,10 +194,8 @@ def listDevices(flags: int = 0) -> list[bytes] | None:
 
         # array of pointers to those strings, initially all NULL
         ba = (c.c_char_p * (devcount + 1))(*[c.addressof(x) for x in bd], None)
-        # for i in range(devcount):
-        #     ba[i] = c.c_char_p(bd[i])
         call_ft(_ft.FT_ListDevices, ba, c.byref(n), _ft.DWORD(defines.LIST_ALL | flags))
-        return [res for res in ba[:devcount]]
+        return list(ba[:devcount])
 
     return None
 
@@ -280,8 +277,8 @@ def openEx(
     id_str: bytes, flags: int = defines.OPEN_BY_SERIAL_NUMBER, update: bool = True
 ) -> FTD2XX:
     """Open a handle to a usb device by serial number(default), description or
-    location(Windows only) depending on value of flags and return an FTD2XX
-    instance for it. Set update to False to avoid a slow call to createDeviceInfoList.
+    location depending on value of flags and return an FTD2XX instance for it.
+    Set update to False to avoid a slow call to createDeviceInfoList.
 
     Args:
         id_str (bytes): The ID string from listDevices.

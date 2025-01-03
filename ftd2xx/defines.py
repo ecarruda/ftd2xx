@@ -1,5 +1,4 @@
-from enum import unique, IntFlag, IntEnum
-import sys
+from enum import IntEnum, IntFlag, unique
 
 # Statuses
 OK = 0
@@ -34,15 +33,12 @@ class OpenExFlags(IntFlag):
 
     OPEN_BY_SERIAL_NUMBER = 1
     OPEN_BY_DESCRIPTION = 2
-
-    if sys.platform == "win32":
-        OPEN_BY_LOCATION = 4
+    OPEN_BY_LOCATION = 4
 
 
 OPEN_BY_SERIAL_NUMBER = OpenExFlags.OPEN_BY_SERIAL_NUMBER
 OPEN_BY_DESCRIPTION = OpenExFlags.OPEN_BY_DESCRIPTION
-if sys.platform == "win32":
-    OPEN_BY_LOCATION = OpenExFlags.OPEN_BY_LOCATION
+OPEN_BY_LOCATION = OpenExFlags.OPEN_BY_LOCATION
 
 
 @unique
