@@ -180,8 +180,7 @@ def call_ft(function: Callable, *args):
 
 def listDevices(flags: int = 0) -> list[bytes] | None:
     """Return a list of serial numbers(default), descriptions or
-    locations (Windows only) of the connected FTDI devices depending on value
-    of flags"""
+    locations of the connected FTDI devices depending on value of flags"""
     n = _ft.DWORD()
     call_ft(_ft.FT_ListDevices, c.byref(n), None, _ft.DWORD(defines.LIST_NUMBER_ONLY))
     devcount = n.value
@@ -280,8 +279,8 @@ def openEx(
     id_str: bytes, flags: int = defines.OPEN_BY_SERIAL_NUMBER, update: bool = True
 ) -> FTD2XX:
     """Open a handle to a usb device by serial number(default), description or
-    location(Windows only) depending on value of flags and return an FTD2XX
-    instance for it. Set update to False to avoid a slow call to createDeviceInfoList.
+    location depending on value of flags and return an FTD2XX instance for it.
+    Set update to False to avoid a slow call to createDeviceInfoList.
 
     Args:
         id_str (bytes): The ID string from listDevices.
